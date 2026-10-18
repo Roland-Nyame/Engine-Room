@@ -134,6 +134,26 @@ export default function App() {
     finally { setLoading(false) }
   }
 
+  async function updatePassword(e: FormEvent) {
+    e.preventDefault(); setError(''); setNotice('')
+    if (!supabase || !session?.user?.id) return
+    if (newPassword.length < 12) { setError('Choose a password with at least 12 characters.'); return }
+    if (newPassword !== confirmPassword) { setError('The passwords do not match.'); return }
+    setSaving(true)
+    try {
+      const { data, error: e1 } = await supabase.functions.invoke('change-own-password', {
+        body: { new_password: newPassword },
+      })
+      if (e1) throw e1
+      if (data?.error) throw new Error(data.error)
+      setPasswordRecovery(false)
+      setNewPassword(''); setConfirmPassword('')
+      setNotice(data?.message || 'Password updated.')
+      await loadProfile(session.user.id)
+    } catch (e) { setError(message(e)) }
+    finally { setSaving(false) }
+  }
+
   async function handleSignOut() {
     if (!supabase) return
     await supabase.auth.signOut()
@@ -232,6 +252,26 @@ export default function App() {
     </main>
   )
 
+  if (passwordRecovery || profile.must_change_password) return (
+    <main className="auth-shell">
+      <section className="auth-card">
+        <Brand />
+        <p className="eyebrow">ACCOUNT SECURITY</p>
+        <h1>{passwordRecovery ? 'Choose a new password' : 'Change your temporary password'}</h1>
+        <p className="muted">{passwordRecovery ? 'Set a new password to finish account recovery.' : 'For your security, replace the temporary password before entering the app.'}</p>
+        <form className="stack" onSubmit={updatePassword}>
+          <label>New password<input required type="password" minLength={12} value={newPassword} onChange={e => setNewPassword(e.target.value)} autoComplete="new-password" /></label>
+          <label>Confirm new password<input required type="password" minLength={12} value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} autoComplete="new-password" /></label>
+          <p className="form-hint">Use at least 12 characters. Do not reuse your temporary password.</p>
+          {error && <Notice kind="error">{error}</Notice>}
+          {notice && <Notice kind="success">{notice}</Notice>}
+          <button className="primary full" disabled={saving}>{saving ? 'Updating…' : 'Save new password'}</button>
+          <button type="button" className="text-button" onClick={handleSignOut}>Sign out</button>
+        </form>
+      </section>
+    </main>
+  )
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -246,7 +286,7 @@ export default function App() {
           </>}
         </nav>
         <div className="sidebar-bottom">
-          <div className="user-chip"><div className="avatar">{profile.full_name?.charAt(0)?.toUpperCase() || 'E'}</div><div className="user-meta"><strong>{profile.full_name}</strong><span>{profile.role !== 'member' ? 'Administrator' : 'Team member'}</span></div></div>
+          <div className="user-chip"><div className="avatar">{profile.full_name?.charAt(0)?.toUpperCase() || 'E'}</div><div className="user-meta"><strong>{profile.full_name}</strong><span>{profile.role === 'super_admin' ? 'Super administrator' : profile.role === 'admin' ? 'Administrator' : 'Team member'}</span></div></div>
           <button className="logout-button" onClick={handleSignOut}><LogOut size={16} /> Sign out</button>
         </div>
       </aside>
@@ -322,7 +362,7 @@ function TransactionTable({ transactions }: { transactions: FundTransaction[] })
   return <div className="table-wrap"><table><thead><tr><th>Transaction</th><th>Date</th><th>Contributor</th><th>Reference</th><th className="align-right">Amount</th></tr></thead><tbody>{transactions.map(tx => <tr key={tx.id}><td><div className="transaction-name"><span className={`tx-icon ${tx.type}`} >{tx.type === 'expense' ? <ArrowUpRight size={16}/> : tx.type === 'contribution' ? <ArrowDownLeft size={16}/> : <RefreshCw size={16}/>}</span><div><strong>{tx.description}</strong><small>{tx.category} · {tx.type}</small></div></div></td><td>{new Date(`${tx.transaction_date}T12:00:00`).toLocaleDateString('en-GH',{day:'2-digit',month:'short',year:'numeric'})}</td><td>{tx.contributor?.full_name || '—'}</td><td>{tx.reference || '—'}</td><td className={`align-right amount ${tx.type}`}>{tx.type === 'expense' ? '−' : tx.type === 'contribution' ? '+' : ''}{money(Math.abs(tx.amount_pesewas))}</td></tr>)}</tbody></table></div>
 }
 function Members({ members, onApprove }: { members: Profile[]; onApprove: (member: Profile, approved: boolean) => void }) {
-  return <div className="page-content"><section className="panel"><div className="panel-heading"><div><h2>Team members</h2><p>Approve access to the financial dashboard</p></div><span className="count-pill">{members.length} accounts</span></div><div className="member-list">{members.map(m => <div className="member-row" key={m.id}><div className="avatar">{m.full_name?.charAt(0)?.toUpperCase() || 'E'}</div><div className="member-details"><strong>{m.full_name}</strong><span>{m.role === 'admin' ? 'Administrator' : 'Member'} · Joined {new Date(m.created_at).toLocaleDateString('en-GH')}</span></div><span className={`status ${m.is_approved ? 'approved' : 'pending'}`}>{m.is_approved ? 'Approved' : 'Pending'}</span>{m.role !== 'admin' && <button className={m.is_approved ? 'secondary small' : 'primary small'} onClick={() => onApprove(m, !m.is_approved)}>{m.is_approved ? 'Suspend' : 'Approve'}</button>}</div>)}</div></section><p className="form-hint">Admin role assignment is intentionally managed from the Supabase SQL editor, not by a browser control.</p></div>
+  return <div className="page-content"><section className="panel"><div className="panel-heading"><div><h2>Team members</h2><p>Approve access to the financial dashboard</p></div><span className="count-pill">{members.length} accounts</span></div><div className="member-list">{members.map(m => <div className="member-row" key={m.id}><div className="avatar">{m.full_name?.charAt(0)?.toUpperCase() || 'E'}</div><div className="member-details"><strong>{m.full_name}</strong><span>{m.role === 'super_admin' ? 'Super administrator' : m.role === 'admin' ? 'Administrator' : 'Member'} · Joined {new Date(m.created_at).toLocaleDateString('en-GH')}</span></div><span className={`status ${m.is_approved ? 'approved' : 'pending'}`}>{m.is_approved ? 'Approved' : 'Pending'}</span>{m.role !== 'admin' && <button className={m.is_approved ? 'secondary small' : 'primary small'} onClick={() => onApprove(m, !m.is_approved)}>{m.is_approved ? 'Suspend' : 'Approve'}</button>}</div>)}</div></section><p className="form-hint">Admin role assignment is intentionally managed from the Supabase SQL editor, not by a browser control.</p></div>
 }
 function Audit({ logs }: { logs: any[] }) {
   return <div className="page-content"><section className="panel"><div className="panel-heading"><div><h2>Audit history</h2><p>Recent recorded changes</p></div></div>{!logs.length ? <div className="empty-state"><ShieldCheck size={28}/><strong>No audit entries yet</strong><span>Financial record activity will be listed here.</span></div> : <div className="audit-list">{logs.map(log => <div className="audit-row" key={log.id}><div className="audit-dot"/><div><strong>{log.action} · {log.table_name}</strong><p>{log.details?.description || log.details?.type || 'Record changed'} · {log.record_id}</p><span>{new Date(log.created_at).toLocaleString('en-GH')}</span></div></div>)}</div>}</section></div>
