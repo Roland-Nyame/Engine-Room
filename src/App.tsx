@@ -305,7 +305,7 @@ export default function App() {
 
         {tab === 'overview' && <Overview totals={totals} transactions={transactions.slice(0, 5)} onViewAll={() => setTab('transactions')} />}
         {tab === 'transactions' && <Transactions transactions={filtered} filter={filter} setFilter={setFilter} onExport={exportCsv} isAdmin={profile.role !== 'member'} onAdd={() => setShowAdd(true)} />}
-        {tab === 'members' && profile.role !== 'member' && <Members members={members} onApprove={approveMember} />}
+        {tab === 'members' && profile.role !== 'member' && <Members members={members} onApprove={approveMember} onCreated={() => loadData().catch(e => setError(message(e)))} />}
         {tab === 'audit' && profile.role !== 'member' && <Audit logs={audit} />}
       </main>
 
@@ -361,8 +361,62 @@ function TransactionTable({ transactions }: { transactions: FundTransaction[] })
   if (!transactions.length) return <div className="empty-state"><CalendarDays size={28}/><strong>No transactions yet</strong><span>Recorded financial activity will appear here.</span></div>
   return <div className="table-wrap"><table><thead><tr><th>Transaction</th><th>Date</th><th>Contributor</th><th>Reference</th><th className="align-right">Amount</th></tr></thead><tbody>{transactions.map(tx => <tr key={tx.id}><td><div className="transaction-name"><span className={`tx-icon ${tx.type}`} >{tx.type === 'expense' ? <ArrowUpRight size={16}/> : tx.type === 'contribution' ? <ArrowDownLeft size={16}/> : <RefreshCw size={16}/>}</span><div><strong>{tx.description}</strong><small>{tx.category} · {tx.type}</small></div></div></td><td>{new Date(`${tx.transaction_date}T12:00:00`).toLocaleDateString('en-GH',{day:'2-digit',month:'short',year:'numeric'})}</td><td>{tx.contributor?.full_name || '—'}</td><td>{tx.reference || '—'}</td><td className={`align-right amount ${tx.type}`}>{tx.type === 'expense' ? '−' : tx.type === 'contribution' ? '+' : ''}{money(Math.abs(tx.amount_pesewas))}</td></tr>)}</tbody></table></div>
 }
-function Members({ members, onApprove }: { members: Profile[]; onApprove: (member: Profile, approved: boolean) => void }) {
-  return <div className="page-content"><section className="panel"><div className="panel-heading"><div><h2>Team members</h2><p>Approve access to the financial dashboard</p></div><span className="count-pill">{members.length} accounts</span></div><div className="member-list">{members.map(m => <div className="member-row" key={m.id}><div className="avatar">{m.full_name?.charAt(0)?.toUpperCase() || 'E'}</div><div className="member-details"><strong>{m.full_name}</strong><span>{m.role === 'super_admin' ? 'Super administrator' : m.role === 'admin' ? 'Administrator' : 'Member'} · Joined {new Date(m.created_at).toLocaleDateString('en-GH')}</span></div><span className={`status ${m.is_approved ? 'approved' : 'pending'}`}>{m.is_approved ? 'Approved' : 'Pending'}</span>{m.role !== 'admin' && <button className={m.is_approved ? 'secondary small' : 'primary small'} onClick={() => onApprove(m, !m.is_approved)}>{m.is_approved ? 'Suspend' : 'Approve'}</button>}</div>)}</div></section><p className="form-hint">Admin role assignment is intentionally managed from the Supabase SQL editor, not by a browser control.</p></div>
+function Members({ members, onApprove, onCreated }: { members: Profile[]; onApprove: (member: Profile, approved: boolean) => void; onCreated: () => void }) {
+  const [fullName, setFullName] = useState('')
+  const [email, setEmail] = useState('')
+  const [temporaryPassword, setTemporaryPassword] = useState('')
+  const [creating, setCreating] = useState(false)
+  const [formError, setFormError] = useState('')
+  const [formNotice, setFormNotice] = useState('')
+
+  async function createMember(e: FormEvent) {
+    e.preventDefault()
+    setFormError(''); setFormNotice('')
+    if (!supabase) return
+    if (temporaryPassword.length < 12) { setFormError('Use a temporary password with at least 12 characters.'); return }
+    setCreating(true)
+    try {
+      const { data, error: invokeError } = await supabase.functions.invoke('create-member', {
+        body: { full_name: fullName.trim(), email: email.trim(), temporary_password: temporaryPassword },
+      })
+      if (invokeError) throw invokeError
+      if (data?.error) throw new Error(data.error)
+      setFormNotice(`Account created for ${data.full_name} (${data.email}). Share the temporary password privately; they must change it at first sign-in.`)
+      setFullName(''); setEmail(''); setTemporaryPassword('')
+      onCreated()
+    } catch (e) {
+      setFormError(message(e))
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  return <div className="page-content">
+    <section className="panel">
+      <div className="panel-heading"><div><h2>Create member account</h2><p>Accounts are created by an administrator; public registration is disabled.</p></div></div>
+      <form className="stack" onSubmit={createMember}>
+        <div className="form-grid">
+          <label>Member's full name<input required minLength={2} maxLength={100} value={fullName} onChange={e => setFullName(e.target.value)} autoComplete="name" /></label>
+          <label>Email address<input required type="email" value={email} onChange={e => setEmail(e.target.value)} autoComplete="email" /></label>
+        </div>
+        <label>Temporary password<input required type="text" minLength={12} value={temporaryPassword} onChange={e => setTemporaryPassword(e.target.value)} autoComplete="off" /></label>
+        <p className="form-hint">Use at least 12 characters. Share it privately, never in the group chat. The member must change it before viewing records.</p>
+        {formError && <Notice kind="error">{formError}</Notice>}
+        {formNotice && <Notice kind="success">{formNotice}</Notice>}
+        <div><button className="primary small" disabled={creating}>{creating ? 'Creating account…' : 'Create member account'}</button></div>
+      </form>
+    </section>
+    <section className="panel">
+      <div className="panel-heading"><div><h2>Team members</h2><p>Approve or suspend access to financial records</p></div><span className="count-pill">{members.length} accounts</span></div>
+      <div className="member-list">{members.map(m => <div className="member-row" key={m.id}>
+        <div className="avatar">{m.full_name?.charAt(0)?.toUpperCase() || 'E'}</div>
+        <div className="member-details"><strong>{m.full_name}</strong><span>{m.role === 'super_admin' ? 'Super administrator' : m.role === 'admin' ? 'Administrator' : 'Member'} · Joined {new Date(m.created_at).toLocaleDateString('en-GH')}</span></div>
+        <span className={`status ${m.is_approved ? 'approved' : 'pending'}`}>{m.is_approved ? 'Approved' : 'Pending'}</span>
+        {m.role === 'member' && <button className={m.is_approved ? 'secondary small' : 'primary small'} onClick={() => onApprove(m, !m.is_approved)}>{m.is_approved ? 'Suspend' : 'Approve'}</button>}
+      </div>)}</div>
+    </section>
+    <p className="form-hint">Administrator role assignment remains restricted to a trusted setup procedure, not a browser control.</p>
+  </div>
 }
 function Audit({ logs }: { logs: any[] }) {
   return <div className="page-content"><section className="panel"><div className="panel-heading"><div><h2>Audit history</h2><p>Recent recorded changes</p></div></div>{!logs.length ? <div className="empty-state"><ShieldCheck size={28}/><strong>No audit entries yet</strong><span>Financial record activity will be listed here.</span></div> : <div className="audit-list">{logs.map(log => <div className="audit-row" key={log.id}><div className="audit-dot"/><div><strong>{log.action} · {log.table_name}</strong><p>{log.details?.description || log.details?.type || 'Record changed'} · {log.record_id}</p><span>{new Date(log.created_at).toLocaleString('en-GH')}</span></div></div>)}</div>}</section></div>
