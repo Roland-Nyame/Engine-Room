@@ -22,8 +22,10 @@ export default function App() {
   const [loading, setLoading] = useState(true)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [fullName, setFullName] = useState('')
-  const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin')
+  const [authMode, setAuthMode] = useState<'signin' | 'forgot'>('signin')
+  const [passwordRecovery, setPasswordRecovery] = useState(false)
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [transactions, setTransactions] = useState<FundTransaction[]>([])
@@ -44,7 +46,7 @@ export default function App() {
   const loadProfile = useCallback(async (userId: string) => {
     if (!supabase) return
     const { data, error: e } = await supabase.from('profiles')
-      .select('id, full_name, role, is_approved, created_at')
+      .select('id, full_name, role, is_approved, must_change_password, created_at')
       .eq('id', userId).maybeSingle()
     if (e) throw e
     setProfile(data as Profile | null)
@@ -59,9 +61,9 @@ export default function App() {
     if (e) throw e
     setTransactions((data ?? []) as unknown as FundTransaction[])
 
-    if (profile.role === 'admin') {
+    if (profile.role !== 'member') {
       const { data: people, error: pe } = await supabase.from('profiles')
-        .select('id,full_name,role,is_approved,created_at').order('created_at', { ascending: false })
+        .select('id,full_name,role,is_approved,must_change_password,created_at').order('created_at', { ascending: false })
       if (pe) throw pe
       setMembers((people ?? []) as Profile[])
       const { data: logs, error: le } = await supabase.from('audit_logs')
@@ -83,7 +85,8 @@ export default function App() {
       }
       setLoading(false)
     })
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    const { data: listener } = supabase.auth.onAuthStateChange((event, nextSession) => {
+      if (event === 'PASSWORD_RECOVERY') setPasswordRecovery(true)
       setSession(nextSession)
       if (!nextSession) { setProfile(null); setTransactions([]); setMembers([]); setAudit([]) }
       else {
@@ -239,13 +242,13 @@ export default function App() {
         <nav>
           <NavButton active={tab === 'overview'} onClick={() => setTab('overview')} icon={<Wallet size={18} />}>Overview</NavButton>
           <NavButton active={tab === 'transactions'} onClick={() => setTab('transactions')} icon={<Banknote size={18} />}>Transactions</NavButton>
-          {profile.role === 'admin' && <>
+          {profile.role !== 'member' && <>
             <NavButton active={tab === 'members'} onClick={() => setTab('members')} icon={<Users size={18} />}>Members</NavButton>
             <NavButton active={tab === 'audit'} onClick={() => setTab('audit')} icon={<ShieldCheck size={18} />}>Audit history</NavButton>
           </>}
         </nav>
         <div className="sidebar-bottom">
-          <div className="user-chip"><div className="avatar">{profile.full_name?.charAt(0)?.toUpperCase() || 'E'}</div><div className="user-meta"><strong>{profile.full_name}</strong><span>{profile.role === 'admin' ? 'Administrator' : 'Team member'}</span></div></div>
+          <div className="user-chip"><div className="avatar">{profile.full_name?.charAt(0)?.toUpperCase() || 'E'}</div><div className="user-meta"><strong>{profile.full_name}</strong><span>{profile.role !== 'member' ? 'Administrator' : 'Team member'}</span></div></div>
           <button className="logout-button" onClick={handleSignOut}><LogOut size={16} /> Sign out</button>
         </div>
       </aside>
@@ -263,15 +266,15 @@ export default function App() {
         {notice && <Notice kind="success">{notice}<button className="notice-close" onClick={() => setNotice('')}><X size={14} /></button></Notice>}
 
         {tab === 'overview' && <Overview totals={totals} transactions={transactions.slice(0, 5)} onViewAll={() => setTab('transactions')} />}
-        {tab === 'transactions' && <Transactions transactions={filtered} filter={filter} setFilter={setFilter} onExport={exportCsv} isAdmin={profile.role === 'admin'} onAdd={() => setShowAdd(true)} />}
-        {tab === 'members' && profile.role === 'admin' && <Members members={members} onApprove={approveMember} />}
-        {tab === 'audit' && profile.role === 'admin' && <Audit logs={audit} />}
+        {tab === 'transactions' && <Transactions transactions={filtered} filter={filter} setFilter={setFilter} onExport={exportCsv} isAdmin={profile.role !== 'member'} onAdd={() => setShowAdd(true)} />}
+        {tab === 'members' && profile.role !== 'member' && <Members members={members} onApprove={approveMember} />}
+        {tab === 'audit' && profile.role !== 'member' && <Audit logs={audit} />}
       </main>
 
       <nav className="mobile-nav">
         <NavButton active={tab === 'overview'} onClick={() => setTab('overview')} icon={<Wallet size={18} />}>Home</NavButton>
         <NavButton active={tab === 'transactions'} onClick={() => setTab('transactions')} icon={<Banknote size={18} />}>Activity</NavButton>
-        {profile.role === 'admin' && <NavButton active={tab === 'members'} onClick={() => setTab('members')} icon={<Users size={18} />}>Members</NavButton>}
+        {profile.role !== 'member' && <NavButton active={tab === 'members'} onClick={() => setTab('members')} icon={<Users size={18} />}>Members</NavButton>}
       </nav>
 
       {showAdd && <div className="modal-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) setShowAdd(false) }}>
