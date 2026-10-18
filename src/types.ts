@@ -1,4 +1,4 @@
-export type Role = 'admin' | 'member'
+export type Role = 'super_admin' | 'admin' | 'member'
 export type TransactionType = 'contribution' | 'expense' | 'adjustment'
 
 export interface Profile {
@@ -6,6 +6,7 @@ export interface Profile {
   full_name: string
   role: Role
   is_approved: boolean
+  must_change_password: boolean
   created_at: string
 }
 
