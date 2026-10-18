@@ -263,10 +263,10 @@ security definer
 set search_path = ''
 as $$
 begin
-  if (new.role is distinct from old.role
+  if ((new.role is distinct from old.role
       or new.is_approved is distinct from old.is_approved
       or new.must_change_password is distinct from old.must_change_password)
-     and not private.has_role(array['admin','super_admin']) then
+     and not private.has_role(array['admin','super_admin'])) then
     raise exception 'Only an administrator can change role, approval, or password-reset status';
   end if;
   return new;
