@@ -157,12 +157,13 @@ export default function App() {
   async function handleSignOut() {
     if (!supabase) return
     await supabase.auth.signOut()
+    setPasswordRecovery(false)
     setProfile(null); setSession(null)
   }
 
   async function addTransaction(e: FormEvent) {
     e.preventDefault(); setError(''); setNotice('')
-    if (!supabase || !profile || profile.role !== 'admin') return
+    if (!supabase || !profile || profile.role === 'member') return
     const parsed = Number(amount)
     if (!Number.isFinite(parsed) || (txType === 'adjustment' ? parsed === 0 : parsed <= 0)) {
       setError(txType === 'adjustment' ? 'Enter a non-zero adjustment amount. Use a negative amount to reduce the balance.' : 'Enter an amount greater than zero.')
@@ -193,7 +194,7 @@ export default function App() {
   }
 
   async function approveMember(member: Profile, approved: boolean) {
-    if (!supabase || profile?.role !== 'admin') return
+    if (!supabase || profile?.role === 'member') return
     setError(''); setNotice('')
     const { error: e1 } = await supabase.from('profiles').update({ is_approved: approved }).eq('id', member.id)
     if (e1) { setError(message(e1)); return }
