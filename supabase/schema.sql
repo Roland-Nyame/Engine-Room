@@ -210,9 +210,10 @@ begin
   end if;
   insert into public.audit_logs(action, table_name, record_id, actor_id, details)
   values (action_name, 'transactions', row_id, actor, row_data);
-  return coalesce(new, old);
+  if tg_op = 'DELETE' then return old; end if;
+  return new;
 end;
-$$;
+$;
 revoke all on function public.log_transaction_change() from public, anon, authenticated;
 drop trigger if exists transactions_audit_changes on public.transactions;
 create trigger transactions_audit_changes after insert or update or delete on public.transactions
