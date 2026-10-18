@@ -22,8 +22,10 @@ export default function App() {
   const [loading, setLoading] = useState(true)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [fullName, setFullName] = useState('')
-  const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin')
+  const [authMode, setAuthMode] = useState<'signin' | 'forgot'>('signin')
+  const [passwordRecovery, setPasswordRecovery] = useState(false)
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [transactions, setTransactions] = useState<FundTransaction[]>([])
@@ -44,7 +46,7 @@ export default function App() {
   const loadProfile = useCallback(async (userId: string) => {
     if (!supabase) return
     const { data, error: e } = await supabase.from('profiles')
-      .select('id, full_name, role, is_approved, created_at')
+      .select('id, full_name, role, is_approved, must_change_password, created_at')
       .eq('id', userId).maybeSingle()
     if (e) throw e
     setProfile(data as Profile | null)
@@ -59,9 +61,9 @@ export default function App() {
     if (e) throw e
     setTransactions((data ?? []) as unknown as FundTransaction[])
 
-    if (profile.role === 'admin') {
+    if (profile.role !== 'member') {
       const { data: people, error: pe } = await supabase.from('profiles')
-        .select('id,full_name,role,is_approved,created_at').order('created_at', { ascending: false })
+        .select('id,full_name,role,is_approved,must_change_password,created_at').order('created_at', { ascending: false })
       if (pe) throw pe
       setMembers((people ?? []) as Profile[])
       const { data: logs, error: le } = await supabase.from('audit_logs')
@@ -83,7 +85,8 @@ export default function App() {
       }
       setLoading(false)
     })
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    const { data: listener } = supabase.auth.onAuthStateChange((event, nextSession) => {
+      if (event === 'PASSWORD_RECOVERY') setPasswordRecovery(true)
       setSession(nextSession)
       if (!nextSession) { setProfile(null); setTransactions([]); setMembers([]); setAudit([]) }
       else {
@@ -117,14 +120,12 @@ export default function App() {
     if (!supabase) return
     setLoading(true)
     try {
-      if (authMode === 'signup') {
-        const { error: e1 } = await supabase.auth.signUp({
-          email, password,
-          options: { data: { full_name: fullName.trim() } },
+      if (authMode === 'forgot') {
+        const { error: e1 } = await supabase.auth.resetPasswordForEmail(email, {
+          redirectTo: window.location.origin + window.location.pathname,
         })
         if (e1) throw e1
-        setNotice('Account created. If email confirmation is enabled, confirm your email. An admin must approve your membership before you can view the funds.')
-        setAuthMode('signin')
+        setNotice('If an account exists for that email, a password-reset link will be sent. Open it on this device to set a new password.')
       } else {
         const { error: e1 } = await supabase.auth.signInWithPassword({ email, password })
         if (e1) throw e1
@@ -133,15 +134,36 @@ export default function App() {
     finally { setLoading(false) }
   }
 
+  async function updatePassword(e: FormEvent) {
+    e.preventDefault(); setError(''); setNotice('')
+    if (!supabase || !session?.user?.id) return
+    if (newPassword.length < 12) { setError('Choose a password with at least 12 characters.'); return }
+    if (newPassword !== confirmPassword) { setError('The passwords do not match.'); return }
+    setSaving(true)
+    try {
+      const { data, error: e1 } = await supabase.functions.invoke('change-own-password', {
+        body: { new_password: newPassword },
+      })
+      if (e1) throw e1
+      if (data?.error) throw new Error(data.error)
+      setPasswordRecovery(false)
+      setNewPassword(''); setConfirmPassword('')
+      setNotice(data?.message || 'Password updated.')
+      await loadProfile(session.user.id)
+    } catch (e) { setError(message(e)) }
+    finally { setSaving(false) }
+  }
+
   async function handleSignOut() {
     if (!supabase) return
     await supabase.auth.signOut()
+    setPasswordRecovery(false)
     setProfile(null); setSession(null)
   }
 
   async function addTransaction(e: FormEvent) {
     e.preventDefault(); setError(''); setNotice('')
-    if (!supabase || !profile || profile.role !== 'admin') return
+    if (!supabase || !profile || profile.role === 'member') return
     const parsed = Number(amount)
     if (!Number.isFinite(parsed) || (txType === 'adjustment' ? parsed === 0 : parsed <= 0)) {
       setError(txType === 'adjustment' ? 'Enter a non-zero adjustment amount. Use a negative amount to reduce the balance.' : 'Enter an amount greater than zero.')
@@ -172,7 +194,7 @@ export default function App() {
   }
 
   async function approveMember(member: Profile, approved: boolean) {
-    if (!supabase || profile?.role !== 'admin') return
+    if (!supabase || profile?.role === 'member') return
     setError(''); setNotice('')
     const { error: e1 } = await supabase.from('profiles').update({ is_approved: approved }).eq('id', member.id)
     if (e1) { setError(message(e1)); return }
@@ -204,19 +226,19 @@ export default function App() {
       <section className="auth-card">
         <Brand />
         <p className="eyebrow">PRAYER TEAM FINANCE</p>
-        <h1>{authMode === 'signin' ? 'Welcome back' : 'Request membership'}</h1>
-        <p className="muted">{authMode === 'signin' ? 'Sign in to view your team’s financial records.' : 'Create an account. An administrator must approve access.'}</p>
+        <h1>{authMode === 'forgot' ? 'Reset your password' : 'Welcome back'}</h1>
+        <p className="muted">{authMode === 'forgot' ? 'Enter the email address linked to your account.' : 'Sign in to view your team’s financial records.'}</p>
         <form onSubmit={handleAuth} className="stack">
-          {authMode === 'signup' && <label>Full name<input required value={fullName} onChange={e => setFullName(e.target.value)} autoComplete="name" /></label>}
           <label>Email address<input required type="email" value={email} onChange={e => setEmail(e.target.value)} autoComplete="email" /></label>
-          <label>Password<input required type="password" minLength={8} value={password} onChange={e => setPassword(e.target.value)} autoComplete={authMode === 'signin' ? 'current-password' : 'new-password'} /></label>
+          {authMode === 'signin' && <label>Password<input required type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" /></label>}
           {error && <Notice kind="error">{error}</Notice>}
           {notice && <Notice kind="success">{notice}</Notice>}
-          <button className="primary full" disabled={loading}>{loading ? 'Please wait…' : authMode === 'signin' ? 'Sign in' : 'Create account'}</button>
+          <button className="primary full" disabled={loading}>{loading ? 'Please wait…' : authMode === 'forgot' ? 'Send reset link' : 'Sign in'}</button>
         </form>
-        <button className="text-button" onClick={() => { setAuthMode(authMode === 'signin' ? 'signup' : 'signin'); setError(''); setNotice('') }}>
-          {authMode === 'signin' ? 'Need an account? Request membership' : 'Already registered? Sign in'}
+        <button className="text-button" onClick={() => { setAuthMode(authMode === 'signin' ? 'forgot' : 'signin'); setError(''); setNotice('') }}>
+          {authMode === 'signin' ? 'Forgot password?' : 'Back to sign in'}
         </button>
+        <p className="muted auth-help">New accounts are created by an administrator.</p>
       </section>
     </main>
   )
@@ -231,6 +253,26 @@ export default function App() {
     </main>
   )
 
+  if (passwordRecovery || profile.must_change_password) return (
+    <main className="auth-shell">
+      <section className="auth-card">
+        <Brand />
+        <p className="eyebrow">ACCOUNT SECURITY</p>
+        <h1>{passwordRecovery ? 'Choose a new password' : 'Change your temporary password'}</h1>
+        <p className="muted">{passwordRecovery ? 'Set a new password to finish account recovery.' : 'For your security, replace the temporary password before entering the app.'}</p>
+        <form className="stack" onSubmit={updatePassword}>
+          <label>New password<input required type="password" minLength={12} value={newPassword} onChange={e => setNewPassword(e.target.value)} autoComplete="new-password" /></label>
+          <label>Confirm new password<input required type="password" minLength={12} value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} autoComplete="new-password" /></label>
+          <p className="form-hint">Use at least 12 characters. Do not reuse your temporary password.</p>
+          {error && <Notice kind="error">{error}</Notice>}
+          {notice && <Notice kind="success">{notice}</Notice>}
+          <button className="primary full" disabled={saving}>{saving ? 'Updating…' : 'Save new password'}</button>
+          <button type="button" className="text-button" onClick={handleSignOut}>Sign out</button>
+        </form>
+      </section>
+    </main>
+  )
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -239,13 +281,13 @@ export default function App() {
         <nav>
           <NavButton active={tab === 'overview'} onClick={() => setTab('overview')} icon={<Wallet size={18} />}>Overview</NavButton>
           <NavButton active={tab === 'transactions'} onClick={() => setTab('transactions')} icon={<Banknote size={18} />}>Transactions</NavButton>
-          {profile.role === 'admin' && <>
+          {profile.role !== 'member' && <>
             <NavButton active={tab === 'members'} onClick={() => setTab('members')} icon={<Users size={18} />}>Members</NavButton>
             <NavButton active={tab === 'audit'} onClick={() => setTab('audit')} icon={<ShieldCheck size={18} />}>Audit history</NavButton>
           </>}
         </nav>
         <div className="sidebar-bottom">
-          <div className="user-chip"><div className="avatar">{profile.full_name?.charAt(0)?.toUpperCase() || 'E'}</div><div className="user-meta"><strong>{profile.full_name}</strong><span>{profile.role === 'admin' ? 'Administrator' : 'Team member'}</span></div></div>
+          <div className="user-chip"><div className="avatar">{profile.full_name?.charAt(0)?.toUpperCase() || 'E'}</div><div className="user-meta"><strong>{profile.full_name}</strong><span>{profile.role === 'super_admin' ? 'Super administrator' : profile.role === 'admin' ? 'Administrator' : 'Team member'}</span></div></div>
           <button className="logout-button" onClick={handleSignOut}><LogOut size={16} /> Sign out</button>
         </div>
       </aside>
@@ -263,15 +305,15 @@ export default function App() {
         {notice && <Notice kind="success">{notice}<button className="notice-close" onClick={() => setNotice('')}><X size={14} /></button></Notice>}
 
         {tab === 'overview' && <Overview totals={totals} transactions={transactions.slice(0, 5)} onViewAll={() => setTab('transactions')} />}
-        {tab === 'transactions' && <Transactions transactions={filtered} filter={filter} setFilter={setFilter} onExport={exportCsv} isAdmin={profile.role === 'admin'} onAdd={() => setShowAdd(true)} />}
-        {tab === 'members' && profile.role === 'admin' && <Members members={members} onApprove={approveMember} />}
-        {tab === 'audit' && profile.role === 'admin' && <Audit logs={audit} />}
+        {tab === 'transactions' && <Transactions transactions={filtered} filter={filter} setFilter={setFilter} onExport={exportCsv} isAdmin={profile.role !== 'member'} onAdd={() => setShowAdd(true)} />}
+        {tab === 'members' && profile.role !== 'member' && <Members members={members} onApprove={approveMember} onCreated={() => loadData().catch(e => setError(message(e)))} />}
+        {tab === 'audit' && profile.role !== 'member' && <Audit logs={audit} />}
       </main>
 
       <nav className="mobile-nav">
         <NavButton active={tab === 'overview'} onClick={() => setTab('overview')} icon={<Wallet size={18} />}>Home</NavButton>
         <NavButton active={tab === 'transactions'} onClick={() => setTab('transactions')} icon={<Banknote size={18} />}>Activity</NavButton>
-        {profile.role === 'admin' && <NavButton active={tab === 'members'} onClick={() => setTab('members')} icon={<Users size={18} />}>Members</NavButton>}
+        {profile.role !== 'member' && <NavButton active={tab === 'members'} onClick={() => setTab('members')} icon={<Users size={18} />}>Members</NavButton>}
       </nav>
 
       {showAdd && <div className="modal-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) setShowAdd(false) }}>
@@ -320,8 +362,62 @@ function TransactionTable({ transactions }: { transactions: FundTransaction[] })
   if (!transactions.length) return <div className="empty-state"><CalendarDays size={28}/><strong>No transactions yet</strong><span>Recorded financial activity will appear here.</span></div>
   return <div className="table-wrap"><table><thead><tr><th>Transaction</th><th>Date</th><th>Contributor</th><th>Reference</th><th className="align-right">Amount</th></tr></thead><tbody>{transactions.map(tx => <tr key={tx.id}><td><div className="transaction-name"><span className={`tx-icon ${tx.type}`} >{tx.type === 'expense' ? <ArrowUpRight size={16}/> : tx.type === 'contribution' ? <ArrowDownLeft size={16}/> : <RefreshCw size={16}/>}</span><div><strong>{tx.description}</strong><small>{tx.category} · {tx.type}</small></div></div></td><td>{new Date(`${tx.transaction_date}T12:00:00`).toLocaleDateString('en-GH',{day:'2-digit',month:'short',year:'numeric'})}</td><td>{tx.contributor?.full_name || '—'}</td><td>{tx.reference || '—'}</td><td className={`align-right amount ${tx.type}`}>{tx.type === 'expense' ? '−' : tx.type === 'contribution' ? '+' : ''}{money(Math.abs(tx.amount_pesewas))}</td></tr>)}</tbody></table></div>
 }
-function Members({ members, onApprove }: { members: Profile[]; onApprove: (member: Profile, approved: boolean) => void }) {
-  return <div className="page-content"><section className="panel"><div className="panel-heading"><div><h2>Team members</h2><p>Approve access to the financial dashboard</p></div><span className="count-pill">{members.length} accounts</span></div><div className="member-list">{members.map(m => <div className="member-row" key={m.id}><div className="avatar">{m.full_name?.charAt(0)?.toUpperCase() || 'E'}</div><div className="member-details"><strong>{m.full_name}</strong><span>{m.role === 'admin' ? 'Administrator' : 'Member'} · Joined {new Date(m.created_at).toLocaleDateString('en-GH')}</span></div><span className={`status ${m.is_approved ? 'approved' : 'pending'}`}>{m.is_approved ? 'Approved' : 'Pending'}</span>{m.role !== 'admin' && <button className={m.is_approved ? 'secondary small' : 'primary small'} onClick={() => onApprove(m, !m.is_approved)}>{m.is_approved ? 'Suspend' : 'Approve'}</button>}</div>)}</div></section><p className="form-hint">Admin role assignment is intentionally managed from the Supabase SQL editor, not by a browser control.</p></div>
+function Members({ members, onApprove, onCreated }: { members: Profile[]; onApprove: (member: Profile, approved: boolean) => void; onCreated: () => void }) {
+  const [fullName, setFullName] = useState('')
+  const [email, setEmail] = useState('')
+  const [temporaryPassword, setTemporaryPassword] = useState('')
+  const [creating, setCreating] = useState(false)
+  const [formError, setFormError] = useState('')
+  const [formNotice, setFormNotice] = useState('')
+
+  async function createMember(e: FormEvent) {
+    e.preventDefault()
+    setFormError(''); setFormNotice('')
+    if (!supabase) return
+    if (temporaryPassword.length < 12) { setFormError('Use a temporary password with at least 12 characters.'); return }
+    setCreating(true)
+    try {
+      const { data, error: invokeError } = await supabase.functions.invoke('create-member', {
+        body: { full_name: fullName.trim(), email: email.trim(), temporary_password: temporaryPassword },
+      })
+      if (invokeError) throw invokeError
+      if (data?.error) throw new Error(data.error)
+      setFormNotice(`Account created for ${data.full_name} (${data.email}). Share the temporary password privately; they must change it at first sign-in.`)
+      setFullName(''); setEmail(''); setTemporaryPassword('')
+      onCreated()
+    } catch (e) {
+      setFormError(message(e))
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  return <div className="page-content">
+    <section className="panel">
+      <div className="panel-heading"><div><h2>Create member account</h2><p>Accounts are created by an administrator; public registration is disabled.</p></div></div>
+      <form className="stack" onSubmit={createMember}>
+        <div className="form-grid">
+          <label>Member's full name<input required minLength={2} maxLength={100} value={fullName} onChange={e => setFullName(e.target.value)} autoComplete="name" /></label>
+          <label>Email address<input required type="email" value={email} onChange={e => setEmail(e.target.value)} autoComplete="email" /></label>
+        </div>
+        <label>Temporary password<input required type="text" minLength={12} value={temporaryPassword} onChange={e => setTemporaryPassword(e.target.value)} autoComplete="off" /></label>
+        <p className="form-hint">Use at least 12 characters. Share it privately, never in the group chat. The member must change it before viewing records.</p>
+        {formError && <Notice kind="error">{formError}</Notice>}
+        {formNotice && <Notice kind="success">{formNotice}</Notice>}
+        <div><button className="primary small" disabled={creating}>{creating ? 'Creating account…' : 'Create member account'}</button></div>
+      </form>
+    </section>
+    <section className="panel">
+      <div className="panel-heading"><div><h2>Team members</h2><p>Approve or suspend access to financial records</p></div><span className="count-pill">{members.length} accounts</span></div>
+      <div className="member-list">{members.map(m => <div className="member-row" key={m.id}>
+        <div className="avatar">{m.full_name?.charAt(0)?.toUpperCase() || 'E'}</div>
+        <div className="member-details"><strong>{m.full_name}</strong><span>{m.role === 'super_admin' ? 'Super administrator' : m.role === 'admin' ? 'Administrator' : 'Member'} · Joined {new Date(m.created_at).toLocaleDateString('en-GH')}</span></div>
+        <span className={`status ${m.is_approved ? 'approved' : 'pending'}`}>{m.is_approved ? 'Approved' : 'Pending'}</span>
+        {m.role === 'member' && <button className={m.is_approved ? 'secondary small' : 'primary small'} onClick={() => onApprove(m, !m.is_approved)}>{m.is_approved ? 'Suspend' : 'Approve'}</button>}
+      </div>)}</div>
+    </section>
+    <p className="form-hint">Administrator role assignment remains restricted to a trusted setup procedure, not a browser control.</p>
+  </div>
 }
 function Audit({ logs }: { logs: any[] }) {
   return <div className="page-content"><section className="panel"><div className="panel-heading"><div><h2>Audit history</h2><p>Recent recorded changes</p></div></div>{!logs.length ? <div className="empty-state"><ShieldCheck size={28}/><strong>No audit entries yet</strong><span>Financial record activity will be listed here.</span></div> : <div className="audit-list">{logs.map(log => <div className="audit-row" key={log.id}><div className="audit-dot"/><div><strong>{log.action} · {log.table_name}</strong><p>{log.details?.description || log.details?.type || 'Record changed'} · {log.record_id}</p><span>{new Date(log.created_at).toLocaleString('en-GH')}</span></div></div>)}</div>}</section></div>
