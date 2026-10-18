@@ -120,14 +120,12 @@ export default function App() {
     if (!supabase) return
     setLoading(true)
     try {
-      if (authMode === 'signup') {
-        const { error: e1 } = await supabase.auth.signUp({
-          email, password,
-          options: { data: { full_name: fullName.trim() } },
+      if (authMode === 'forgot') {
+        const { error: e1 } = await supabase.auth.resetPasswordForEmail(email, {
+          redirectTo: window.location.origin + window.location.pathname,
         })
         if (e1) throw e1
-        setNotice('Account created. If email confirmation is enabled, confirm your email. An admin must approve your membership before you can view the funds.')
-        setAuthMode('signin')
+        setNotice('If an account exists for that email, a password-reset link will be sent. Open it on this device to set a new password.')
       } else {
         const { error: e1 } = await supabase.auth.signInWithPassword({ email, password })
         if (e1) throw e1
@@ -207,19 +205,19 @@ export default function App() {
       <section className="auth-card">
         <Brand />
         <p className="eyebrow">PRAYER TEAM FINANCE</p>
-        <h1>{authMode === 'signin' ? 'Welcome back' : 'Request membership'}</h1>
-        <p className="muted">{authMode === 'signin' ? 'Sign in to view your team’s financial records.' : 'Create an account. An administrator must approve access.'}</p>
+        <h1>{authMode === 'forgot' ? 'Reset your password' : 'Welcome back'}</h1>
+        <p className="muted">{authMode === 'forgot' ? 'Enter the email address linked to your account.' : 'Sign in to view your team’s financial records.'}</p>
         <form onSubmit={handleAuth} className="stack">
-          {authMode === 'signup' && <label>Full name<input required value={fullName} onChange={e => setFullName(e.target.value)} autoComplete="name" /></label>}
           <label>Email address<input required type="email" value={email} onChange={e => setEmail(e.target.value)} autoComplete="email" /></label>
-          <label>Password<input required type="password" minLength={8} value={password} onChange={e => setPassword(e.target.value)} autoComplete={authMode === 'signin' ? 'current-password' : 'new-password'} /></label>
+          {authMode === 'signin' && <label>Password<input required type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" /></label>}
           {error && <Notice kind="error">{error}</Notice>}
           {notice && <Notice kind="success">{notice}</Notice>}
-          <button className="primary full" disabled={loading}>{loading ? 'Please wait…' : authMode === 'signin' ? 'Sign in' : 'Create account'}</button>
+          <button className="primary full" disabled={loading}>{loading ? 'Please wait…' : authMode === 'forgot' ? 'Send reset link' : 'Sign in'}</button>
         </form>
-        <button className="text-button" onClick={() => { setAuthMode(authMode === 'signin' ? 'signup' : 'signin'); setError(''); setNotice('') }}>
-          {authMode === 'signin' ? 'Need an account? Request membership' : 'Already registered? Sign in'}
+        <button className="text-button" onClick={() => { setAuthMode(authMode === 'signin' ? 'forgot' : 'signin'); setError(''); setNotice('') }}>
+          {authMode === 'signin' ? 'Forgot password?' : 'Back to sign in'}
         </button>
+        <p className="muted auth-help">New accounts are created by an administrator.</p>
       </section>
     </main>
   )
