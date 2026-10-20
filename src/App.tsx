@@ -203,6 +203,52 @@ export default function App() {
     await loadData()
   }
 
+  async function changeMemberRole(
+    member: Profile,
+    newRole: 'admin' | 'member'
+  ) {
+    if (!supabase || profile?.role !== 'super_admin') return
+
+    if (member.role === 'super_admin') {
+      setError('The Super Admin role cannot be changed.')
+      return
+    }
+
+    if (newRole === 'admin' && !member.is_approved) {
+      setError('Approve the member before appointing them as Admin.')
+      return
+    }
+
+    const action = newRole === 'admin'
+      ? 'appoint as Administrator'
+      : 'remove from the Administrator role'
+
+    if (!window.confirm(
+      `Are you sure you want to ${action} ${member.full_name}?`
+    )) return
+
+    setError('')
+    setNotice('')
+
+    const { error: roleError } = await supabase
+      .from('profiles')
+      .update({ role: newRole })
+      .eq('id', member.id)
+
+    if (roleError) {
+      setError(message(roleError))
+      return
+    }
+
+    setNotice(
+      `${member.full_name} is now ${
+        newRole === 'admin' ? 'an Administrator' : 'a Member'
+      }.`
+    )
+
+    await loadData()
+  }
+
   function exportCsv() {
     const rows = [
       ['Date', 'Type', 'Description', 'Category', 'Contributor', 'Amount (GHS)', 'Reference'],
@@ -308,7 +354,7 @@ export default function App() {
 
         {tab === 'overview' && <Overview totals={totals} transactions={transactions.slice(0, 5)} onViewAll={() => setTab('transactions')} />}
         {tab === 'transactions' && <Transactions transactions={filtered} filter={filter} setFilter={setFilter} onExport={exportCsv} isAdmin={profile.role !== 'member'} onAdd={() => setShowAdd(true)} />}
-        {tab === 'members' && profile.role !== 'member' && <Members members={members} onApprove={approveMember} onCreated={() => loadData().catch(e => setError(message(e)))} />}
+        {tab === 'members' && profile.role !== 'member' && <Members members={members} onApprove={approveMember} onCreated={() => loadData().catch(e => setError(message(e)))} isSuperAdmin={profile.role === 'super_admin'} onChangeRole={changeMemberRole} />}
         {tab === 'audit' && profile.role !== 'member' && <Audit logs={audit} />}
 
         {tab === 'chat' && <div className="page-content"><GroupChat userId={session.user.id} isAdmin={profile.role !== 'member'} /></div>}
@@ -389,7 +435,7 @@ function TransactionTable({ transactions }: { transactions: FundTransaction[] })
   if (!transactions.length) return <div className="empty-state"><CalendarDays size={28}/><strong>No transactions yet</strong><span>Recorded financial activity will appear here.</span></div>
   return <div className="table-wrap"><table><thead><tr><th>Transaction</th><th>Date</th><th>Contributor</th><th>Reference</th><th className="align-right">Amount</th></tr></thead><tbody>{transactions.map(tx => <tr key={tx.id}><td><div className="transaction-name"><span className={`tx-icon ${tx.type}`} >{tx.type === 'expense' ? <ArrowUpRight size={16}/> : tx.type === 'contribution' ? <ArrowDownLeft size={16}/> : <RefreshCw size={16}/>}</span><div><strong>{tx.description}</strong><small>{tx.category} · {tx.type}</small></div></div></td><td>{new Date(`${tx.transaction_date}T12:00:00`).toLocaleDateString('en-GH',{day:'2-digit',month:'short',year:'numeric'})}</td><td>{tx.contributor?.full_name || '—'}</td><td>{tx.reference || '—'}</td><td className={`align-right amount ${tx.type}`}>{tx.type === 'expense' ? '−' : tx.type === 'contribution' ? '+' : ''}{money(Math.abs(tx.amount_pesewas))}</td></tr>)}</tbody></table></div>
 }
-function Members({ members, onApprove, onCreated }: { members: Profile[]; onApprove: (member: Profile, approved: boolean) => void; onCreated: () => void }) {
+function Members({ members, onApprove, onCreated, isSuperAdmin, onChangeRole }: { members: Profile[]; onApprove: (member: Profile, approved: boolean) => void; onCreated: () => void; isSuperAdmin: boolean; onChangeRole: (member: Profile, role: 'admin' | 'member') => void }) {
   const [fullName, setFullName] = useState('')
   const [email, setEmail] = useState('')
   const [temporaryPassword, setTemporaryPassword] = useState('')
@@ -441,9 +487,27 @@ function Members({ members, onApprove, onCreated }: { members: Profile[]; onAppr
         <div className="member-details"><strong>{m.full_name}</strong><span>{m.role === 'super_admin' ? 'Super administrator' : m.role === 'admin' ? 'Administrator' : 'Member'} · Joined {new Date(m.created_at).toLocaleDateString('en-GH')}</span></div>
         <span className={`status ${m.is_approved ? 'approved' : 'pending'}`}>{m.is_approved ? 'Approved' : 'Pending'}</span>
         {m.role === 'member' && <button className={m.is_approved ? 'secondary small' : 'primary small'} onClick={() => onApprove(m, !m.is_approved)}>{m.is_approved ? 'Suspend' : 'Approve'}</button>}
+        {isSuperAdmin && m.role === 'member' && m.is_approved && (
+          <button
+            type="button"
+            className="primary small"
+            onClick={() => onChangeRole(m, 'admin')}
+          >
+            Appoint Admin
+          </button>
+        )}
+        {isSuperAdmin && m.role === 'admin' && (
+          <button
+            type="button"
+            className="secondary small"
+            onClick={() => onChangeRole(m, 'member')}
+          >
+            Remove Admin
+          </button>
+        )}
       </div>)}</div>
     </section>
-    <p className="form-hint">Administrator role assignment remains restricted to a trusted setup procedure, not a browser control.</p>
+    <p className="form-hint">Only the Super Administrator can appoint or remove administrators. Administrators can manage financial records and ordinary members.</p>
   </div>
 }
 function Audit({ logs }: { logs: any[] }) {
