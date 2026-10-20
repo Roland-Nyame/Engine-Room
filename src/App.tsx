@@ -343,7 +343,29 @@ export default function App() {
 function SetupScreen() {
   return <main className="center-screen"><div className="brand-mark"><Wallet size={26}/></div><p className="eyebrow">THE ENGINE ROOM</p><h1>Connect your Supabase project</h1><p className="muted setup-copy">Create a <code>.env.local</code> file in the project root. Copy the two values from <strong>Supabase → Project Settings → API</strong>, using the project URL and publishable/anon key only.</p><pre className="code-sample">VITE_SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co{'\n'}VITE_SUPABASE_ANON_KEY=YOUR_PUBLISHABLE_OR_ANON_KEY</pre><p className="warning-copy"><CircleAlert size={16}/> Never use a service-role key in a browser app.</p></main>
 }
-function Brand() { return <div className="brand"><div className="brand-mark"><Wallet size={22}/></div><div><strong>The Engine Room</strong><span>Prayer team funds</span></div></div> }
+
+function Brand() {
+  return (
+    <div className="brand">
+      <img
+        src={`${import.meta.env.BASE_URL}ministry-logo.jfif`}
+        alt="Edumfa Heavenly Ministries International"
+        style={{
+          width: 52,
+          height: 52,
+          objectFit: 'contain',
+          borderRadius: '50%',
+          background: '#ffffff',
+          flexShrink: 0
+        }}
+      />
+      <div>
+        <strong>The Engine Room</strong>
+        <span>Edumfa Heavenly Ministries International</span>
+      </div>
+    </div>
+  )
+}
 function NavButton({ active, onClick, icon, children }: { active: boolean; onClick: () => void; icon: ReactNode; children: ReactNode }) { return <button className={`nav-button ${active ? 'active' : ''}`} onClick={onClick}>{icon}<span>{children}</span></button> }
 function Notice({ kind, children }: { kind: 'error' | 'success'; children: ReactNode }) { return <div className={`notice ${kind}`}>{kind === 'error' ? <CircleAlert size={17}/> : <Check size={17}/>}<div>{children}</div></div> }
 function Metric({ title, value, icon, tone, subtitle }: { title: string; value: string; icon: ReactNode; tone: string; subtitle: string }) { return <section className="metric-card"><div className={`metric-icon ${tone}`}>{icon}</div><p>{title}</p><strong>{value}</strong><span>{subtitle}</span></section> }
