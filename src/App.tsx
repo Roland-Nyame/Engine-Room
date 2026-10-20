@@ -6,6 +6,7 @@ import {
   X
 } from 'lucide-react'
 import { isSupabaseConfigured, supabase } from './lib/supabase'
+import GroupChat from './components/GroupChat'
 import type { FundTransaction, Profile, TransactionType } from './types'
 
 const money = (pesewas: number) => new Intl.NumberFormat('en-GH', {
@@ -14,7 +15,7 @@ const money = (pesewas: number) => new Intl.NumberFormat('en-GH', {
 
 const today = () => new Date().toISOString().slice(0, 10)
 
-type Tab = 'overview' | 'transactions' | 'members' | 'audit'
+type Tab = 'overview' | 'transactions' | 'members' | 'audit' | 'chat' | 'chat'
 
 export default function App() {
   const [session, setSession] = useState<any>(null)
@@ -281,6 +282,7 @@ export default function App() {
         <nav>
           <NavButton active={tab === 'overview'} onClick={() => setTab('overview')} icon={<Wallet size={18} />}>Overview</NavButton>
           <NavButton active={tab === 'transactions'} onClick={() => setTab('transactions')} icon={<Banknote size={18} />}>Transactions</NavButton>
+          <NavButton active={tab === 'chat'} onClick={() => setTab('chat')} icon={<Users size={18} />}>Group Chat</NavButton>
           {profile.role !== 'member' && <>
             <NavButton active={tab === 'members'} onClick={() => setTab('members')} icon={<Users size={18} />}>Members</NavButton>
             <NavButton active={tab === 'audit'} onClick={() => setTab('audit')} icon={<ShieldCheck size={18} />}>Audit history</NavButton>
@@ -308,11 +310,14 @@ export default function App() {
         {tab === 'transactions' && <Transactions transactions={filtered} filter={filter} setFilter={setFilter} onExport={exportCsv} isAdmin={profile.role !== 'member'} onAdd={() => setShowAdd(true)} />}
         {tab === 'members' && profile.role !== 'member' && <Members members={members} onApprove={approveMember} onCreated={() => loadData().catch(e => setError(message(e)))} />}
         {tab === 'audit' && profile.role !== 'member' && <Audit logs={audit} />}
+
+        {tab === 'chat' && <div className="page-content"><GroupChat userId={session.user.id} isAdmin={profile.role !== 'member'} /></div>}
       </main>
 
       <nav className="mobile-nav">
         <NavButton active={tab === 'overview'} onClick={() => setTab('overview')} icon={<Wallet size={18} />}>Home</NavButton>
         <NavButton active={tab === 'transactions'} onClick={() => setTab('transactions')} icon={<Banknote size={18} />}>Activity</NavButton>
+        <NavButton active={tab === 'chat'} onClick={() => setTab('chat')} icon={<Users size={18} />}>Chat</NavButton>
         {profile.role !== 'member' && <NavButton active={tab === 'members'} onClick={() => setTab('members')} icon={<Users size={18} />}>Members</NavButton>}
       </nav>
 
@@ -422,5 +427,5 @@ function Members({ members, onApprove, onCreated }: { members: Profile[]; onAppr
 function Audit({ logs }: { logs: any[] }) {
   return <div className="page-content"><section className="panel"><div className="panel-heading"><div><h2>Audit history</h2><p>Recent recorded changes</p></div></div>{!logs.length ? <div className="empty-state"><ShieldCheck size={28}/><strong>No audit entries yet</strong><span>Financial record activity will be listed here.</span></div> : <div className="audit-list">{logs.map(log => <div className="audit-row" key={log.id}><div className="audit-dot"/><div><strong>{log.action} · {log.table_name}</strong><p>{log.details?.description || log.details?.type || 'Record changed'} · {log.record_id}</p><span>{new Date(log.created_at).toLocaleString('en-GH')}</span></div></div>)}</div>}</section></div>
 }
-function tabTitle(tab: Tab) { return ({ overview: 'Overview', transactions: 'Transactions', members: 'Team members', audit: 'Audit history' })[tab] }
+function tabTitle(tab: Tab) { return ({ overview: 'Overview', transactions: 'Transactions', members: 'Team members', audit: 'Audit history', chat: 'Group Chat' })[tab] }
 function message(e: unknown) { return e instanceof Error ? e.message : typeof e === 'object' && e && 'message' in e ? String((e as {message: unknown}).message) : 'Something went wrong. Please try again.' }
